@@ -72,6 +72,7 @@ int activity_event_listener(const zmk_event_t *eh) {
 void activity_work_handler(struct k_work *work) {
     int32_t current = k_uptime_get();
     int32_t inactive_time = current - activity_last_uptime;
+
 #if IS_ENABLED(CONFIG_ZMK_SLEEP)
     bool prevent_sleep = is_usb_power_present();
 
@@ -86,6 +87,19 @@ void activity_work_handler(struct k_work *work) {
 #endif
 #endif
     if (inactive_time > MAX_SLEEP_MS && !prevent_sleep) {
+        // Put devices in suspend power mode before sleeping
+        set_state(ZMK_ACTIVITY_SLEEP);
+
+        if (zmk_pm_suspend_devices() < 0) {
+            LOG_ERR("Failed to suspend all the devices");
+            zmk_pm_resume_devices();
+            return;
+        }
+
+        sys_poweroff();
+    } else
+#endif /* IS_ENABLED(CONFIG_ZMK_SLEEP) */
+        if (inactive_time > MAX_IDLE_MS) {
             set_state(ZMK_ACTIVITY_IDLE);
         }
 }
