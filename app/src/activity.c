@@ -26,6 +26,10 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 #include <zmk/usb.h>
 #endif
 
+#if IS_ENABLED(CONFIG_ZMK_NO_SLEEP_WHILE_BLE_CONNECTED)
+#include <zmk/ble.h>
+#endif
+
 bool is_usb_power_present(void) {
 #if IS_ENABLED(CONFIG_USB_DEVICE_STACK)
     return zmk_usb_is_powered();
@@ -69,20 +73,19 @@ void activity_work_handler(struct k_work *work) {
     int32_t current = k_uptime_get();
     int32_t inactive_time = current - activity_last_uptime;
 #if IS_ENABLED(CONFIG_ZMK_SLEEP)
-    if (inactive_time > MAX_SLEEP_MS && !is_usb_power_present()) {
-        // Put devices in suspend power mode before sleeping
-        set_state(ZMK_ACTIVITY_SLEEP);
+    bool prevent_sleep = is_usb_power_present();
 
-        if (zmk_pm_suspend_devices() < 0) {
-            LOG_ERR("Failed to suspend all the devices");
-            zmk_pm_resume_devices();
-            return;
-        }
-
-        sys_poweroff();
-    } else
-#endif /* IS_ENABLED(CONFIG_ZMK_SLEEP) */
-        if (inactive_time > MAX_IDLE_MS) {
+#if IS_ENABLED(CONFIG_ZMK_NO_SLEEP_WHILE_BLE_CONNECTED)
+    /* if user inactive and USB is not connected,
+     * keyboard will sleep as soon as BLE is disconnected
+     */
+#if !IS_ENABLED(CONFIG_ZMK_SPLIT) || IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
+    prevent_sleep = prevent_sleep || zmk_ble_active_profile_is_connected();
+#else
+    prevent_sleep = prevent_sleep || zmk_split_bt_peripheral_is_connected();
+#endif
+#endif
+    if (inactive_time > MAX_SLEEP_MS && !prevent_sleep) {
             set_state(ZMK_ACTIVITY_IDLE);
         }
 }
